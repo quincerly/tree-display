@@ -5,7 +5,8 @@ Requires numpy, scipy
 
 '''
 
-import unicornhat as unicorn
+import neopixel
+#import unicornhat as unicorn
 import time, scipy.constants, scipy.special
 import scipy
 import numpy as np
@@ -23,7 +24,6 @@ import picamera
 import cv2
 import io
 
-
 def ProcessCommandLine():
 
 	"""Create an argparse parser for the command line options."""
@@ -35,14 +35,43 @@ def ProcessCommandLine():
 	#		    help='Include crossing blobs animation')
  	#parser.add_argument('--duration-sec', metavar='SECONDS', type=float, default=2,
 	#		    help='Duration of each mode before cycling')
-	#parser.add_argument('--debug', action='store_true', default=False,
-	#		    help='Print back trace in event of exception')
+	parser.add_argument('--debug', action='store_true', default=False,
+			    help='Print back trace in event of exception')
 
 
 	return parser.parse_args()
 
+class NeopixelStrip:
+        def __init__(self,
+                     LED_COUNT      = 150,     # Number of LED pixels.
+                     LED_PIN        = 18,      # GPIO pin connected to the pixels (must support PWM!).
+                     LED_FREQ_HZ    = 800000,  # LED signal frequency in hertz (usually 800khz)
+                     LED_DMA        = 5,       # DMA channel to use for generating signal (try 5)
+                     LED_BRIGHTNESS = 255,     # Set to 0 for darkest and 255 for brightest
+                     LED_INVERT     = False,   # True to invert the signal (when using NPN transistor level shift)
+             ):
+
+                self._strip=neopixel.Adafruit_NeoPixel(LED_COUNT, LED_PIN, LED_FREQ_HZ, LED_DMA, LED_INVERT, LED_BRIGHTNESS)
+                # Intialize the library (must be called once before other functions).
+                self._strip.begin()
+                self._ind=np.array(range(LED_COUNT))
+
+        def shuffle(self, seed=None):
+                np.random.seed(seed)
+		np.random.shuffle(self._ind)
+
+        def clear(self):
+                """Set all off"""
+                for i in range(self._strip.numPixels()):
+                        self._strip.setPixelColor(i, neopixel.Color(0, 0, 0))
+                self._strip.show()
+
+        def set_element(self, i, (r, g, b)):
+                self._strip.setPixelColor(self._ind[i], neopixel.Color(int(r), int(g), int(b)))
+		self._strip.show()
+
 class UnicornAsStrip:
-	def __init__(self, seed=None):
+	def __init__(self):
 		iy, ix=np.mgrid[0:8, 0:8]
  		self._pix_ind=zip(np.ravel(ix), np.ravel(iy))
 
@@ -134,8 +163,9 @@ def centroid(image):
 
 def Run(args):
 
-	s=UnicornAsStrip(0)
-        s.shuffle()
+	#s=UnicornAsStrip()
+	s=NeopixelStrip()
+        #s.shuffle(0)
 
 	rgb=50, 50, 50
 
@@ -163,7 +193,7 @@ def Run(args):
         camera.stop_preview()
 
         nempty=20
-        nspots=64
+        nspots=10
 
         # Grab empty (no lights on) stack
         s.clear()
@@ -179,8 +209,9 @@ def Run(args):
         for i in range(nspots):
                 print("Image %d/%d..." % (i+1, nspots))
                 s.clear()
-                s.set_element(i, rgb)
+                s.set_element(i+70, rgb)
                 ims.append(np.mean(grab_image(camera), -1))
+        s.clear()
 
         nims=len(ims)
         #nrows=int(np.ceil(np.sqrt(nims+1)))
@@ -209,7 +240,7 @@ def Run(args):
         cys=[]
         for i in range(nims):
                 print("Segment %d of %d" % (i+1, nims))
-                segim=segger.segment(ims[i], nsig=50.)
+                segim=segger.segment(ims[i], nsig=100.)
                 segtot+=segim
                 #ax=fig.add_subplot(nrows, ncols, i+1)
                 #ax.set_title("Segmented")
@@ -221,8 +252,14 @@ def Run(args):
                 cys.append(cy)
 
         #ax=fig.add_subplot(nrows, ncols, nims+1)
-        ax=fig.add_subplot(1, 1, 1)
+        ax=fig.add_subplot(2, 1, 1)
         ax.imshow(segtot, cmap='gray')
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.plot(cxs, cys, lw=0, marker='x', color='red')
+
+        ax=fig.add_subplot(2, 1, 2)
+        ax.imshow(segger.meanempty(), cmap='gray')
         ax.set_xticks([])
         ax.set_yticks([])
         ax.plot(cxs, cys, lw=0, marker='x', color='red')
@@ -236,7 +273,6 @@ if __name__ == "__main__":
 	try:
 
 		Run(args)
-		
 
 	except Exception, err:
 
