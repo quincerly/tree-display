@@ -110,7 +110,93 @@ def grab_image(camera):
 	return image[:, :, ::-1]*1.
 
 class Segmenter:
+	def __init__(self):
+
+                self._imscale=1./255
+                self._nempty=0
+                self._totempty=None
+                self._totempty2=None
+                self._segtot=None
+                self._cx=[]
+                self._cy=[]
+
+        def add_empty(self, empty):
+
+                if self._nempty==0:
+                        self._nempty=1
+                        self._totempty=empty*self._imscale
+                        self._totempty2=empty*empty*self._imscale*self._imscale
+                else:
+                        self._nempty+=1
+                        self._totempty+=empty*self._imscale
+                        self._totempty2+=empty*empty*self._imscale*self._imscale
+
+        def calc_empty_stats(self):
+
+                # Per-pixel average empty image
+                self._meanempty=self._totempty*1./self._nempty
+
+                # Per-pixel standard deviation empty image (need to keep an eye
+                # out for precision issues calculating this way (from |x|^2 and |x^2|)
+                #self._sigempty=np.sqrt(self._totempty2*1./self._nempty-self._meanempty*self._meanempty)
+
+                # Set zero values to minimum non-zero value
+                #self._sigempty[np.where(self._sigempty==0)]=self._sigempty[np.where(self._sigempty>0)].min()
+
+                # Save memory
+                del self._totempty
+                #del self._totempty2
+
+	def segmentold(self, im, nsig=0.5):
+                ndev=(im*self._imscale-self._meanempty)/self._sigempty
+		on=np.where(ndev>nsig)
+		off=np.where(ndev<=nsig)
+		segim=im*0.
+		segim[on]=1.
+		segim[off]=0.
+                if self._segtot is None:
+                        self._segtot=segim
+                else:
+                        self._segtot+=segim
+                cx, cy=centroid(segim)
+                self._cx.append(cx)
+                self._cy.append(cy)
+
+	def segment(self, im, frac=0.99):
+                dev=im*self._imscale-self._meanempty
+                thresh=np.sort(dev.flatten())[int(frac*len(dev))]
+		on=np.where(dev>thresh)
+		off=np.where(dev<=thresh)
+		segim=im*0.
+		segim[on]=1.
+		segim[off]=0.
+                if self._segtot is None:
+                        self._segtot=segim
+                else:
+                        self._segtot+=segim
+                cx, cy=centroid(segim)
+                self._cx.append(cx)
+                self._cy.append(cy)
+
+
+        def meanempty(self):
+                return self._meanempty
+
+        def sigempty(self):
+                return self._sigempty
+
+        def segtot(self):
+                return self._segtot
+
+        def x(self):
+                return self._cx
+
+        def y(self):
+                return self._cy
+
+class SegmenterOld:
 	def __init__(self, emptystack):
+
 		nempty=len(emptystack)
                 #print("segger nempty %d" % nempty)
 
@@ -192,77 +278,49 @@ def Run(args):
         camera.iso=100
         camera.stop_preview()
 
-        nempty=20
+        nempty=1
         nspots=10
+
+        segger=Segmenter()
 
         # Grab empty (no lights on) stack
         s.clear()
-        emptystack=[]
         for i in range(nempty):
                 print("Empty %d/%d..." % (i+1, nempty))
-                empty=np.mean(grab_image(camera), -1)
-                emptystack.append(empty)
+                segger.add_empty(np.mean(grab_image(camera), -1))
         s.clear()
 
-        # Grab images with each light on
-        ims=[]
+        segger.calc_empty_stats()
+
+        # Grab and segment images with each light on
         for i in range(nspots):
                 print("Image %d/%d..." % (i+1, nspots))
                 s.clear()
                 s.set_element(i+70, rgb)
-                ims.append(np.mean(grab_image(camera), -1))
+                segger.segment(np.mean(grab_image(camera), -1))
         s.clear()
 
-        nims=len(ims)
-        #nrows=int(np.ceil(np.sqrt(nims+1)))
-        #ncols=int(np.ceil((nims+1)*1./nrows))
+        fig=plt.figure(figsize=(21./2.54, 29.7/2.54))
 
-        segger=Segmenter(emptystack)
-        meanempty=segger.meanempty()
-        sigempty=segger.sigempty()
+        ax1=fig.add_subplot(3, 1, 1)
+        ax1.imshow(segger.meanempty(), cmap='gray')
+        ax1.set_title("Mean empty [%g to %g]" % (segger.meanempty().min(), segger.meanempty().max()))
+        ax1.plot(segger.x(), segger.y(), lw=0, marker='x', color='red')
+        ax1.set_xticks([])
+        ax1.set_yticks([])
 
-        fig=plt.figure()
+        ax2=fig.add_subplot(3, 1, 2)
+        ax2.imshow(segger.sigempty(), cmap='gray')
+        ax2.set_title("Std dev empty [%g to %g]" % (segger.sigempty().min(), segger.sigempty().max()))
+        ax2.set_xticks([])
+        ax2.set_yticks([])
 
-        #ax=fig.add_subplot(nrows, ncols, 1)
-        #ax.set_title("Mean empty [%g to %g]" % (meanempty.min(), meanempty.max()))
-        #ax.imshow(meanempty, cmap='hot')
-        #ax.set_xticks([])
-        #ax.set_yticks([])
-
-        #ax=fig.add_subplot(nrows, ncols, 2)
-        #ax.set_title("Std dev empty [%g to %g]" % (sigempty.min(), sigempty.max()))
-        #ax.imshow(sigempty, cmap='hot')
-        #ax.set_xticks([])
-        #ax.set_yticks([])
-
-        segtot=ims[0]*0.
-        cxs=[]
-        cys=[]
-        for i in range(nims):
-                print("Segment %d of %d" % (i+1, nims))
-                segim=segger.segment(ims[i], nsig=100.)
-                segtot+=segim
-                #ax=fig.add_subplot(nrows, ncols, i+1)
-                #ax.set_title("Segmented")
-                #ax.imshow(segim, cmap='hot')
-                #ax.set_xticks([])
-                #ax.set_yticks([])
-                cx, cy=centroid(segim)
-                cxs.append(cx)
-                cys.append(cy)
-
-        #ax=fig.add_subplot(nrows, ncols, nims+1)
-        ax=fig.add_subplot(2, 1, 1)
-        ax.imshow(segtot, cmap='gray')
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.plot(cxs, cys, lw=0, marker='x', color='red')
-
-        ax=fig.add_subplot(2, 1, 2)
-        ax.imshow(segger.meanempty(), cmap='gray')
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.plot(cxs, cys, lw=0, marker='x', color='red')
+        ax3=fig.add_subplot(3, 1, 3)
+        ax3.imshow(segger.segtot(), cmap='gray')
+        ax3.set_title("Segmented")
+        ax3.set_xticks([])
+        ax3.set_yticks([])
+        ax3.plot(segger.x(), segger.y(), lw=0, marker='x', color='red')
 
         plt.savefig('led_positions.pdf')
 
