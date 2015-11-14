@@ -1,45 +1,24 @@
 #!/usr/bin/env python
 
 '''
-Requires numpy, scipy
-
+Neopixel strip location registration and control
 '''
 
 import neopixel
 #import unicornhat as unicorn
-import time, scipy.constants, scipy.special
-import scipy
+import time
+import argparse
 import numpy as np
 import sys
 import traceback
 import os
-import datetime
-import subprocess
-import uuid
-import matplotlib.image
 import matplotlib
 matplotlib.use('pdf')
 import matplotlib.pyplot as plt
 import picamera
 import cv2
 import io
-
-def ProcessCommandLine():
-
-	"""Create an argparse parser for the command line options."""
-	import argparse
-
-	parser = argparse.ArgumentParser(description=__doc__.strip())
-
-	#parser.add_argument('--crossing-blobs', action='store_true', default=False,
-	#		    help='Include crossing blobs animation')
- 	#parser.add_argument('--duration-sec', metavar='SECONDS', type=float, default=2,
-	#		    help='Duration of each mode before cycling')
-	parser.add_argument('--debug', action='store_true', default=False,
-			    help='Print back trace in event of exception')
-
-
-	return parser.parse_args()
+import json
 
 class NeopixelStrip:
         def __init__(self,
@@ -197,13 +176,13 @@ class Segmenter:
                 return self._segtot
 
         def x(self):
-                return self._cx
+                return np.array(self._cx)
 
         def y(self):
-                return self._cy
+                return np.array(self._cy)
 
         def pixelid(self):
-                return self._pixelid
+                return np.array(self._pixelid)
 
 def centroid(image):
         imh, imw=image.shape
@@ -214,100 +193,175 @@ def centroid(image):
         iymean=np.sum(iy*image)/np.sum(image)
         return ixmean, iymean
 
+class Calibration:
+        def __init__(self):
+                self._x, self._y, self._pixelid=None, None, None
+
+        def create(self, s, filename):
+
+                rgb=50, 50, 50
+
+                print("Initialising camera...")
+                camera=picamera.PiCamera()
+                camera.hflip=True
+                camera.vflip=True
+
+                # Adjust setting while showing a spot then fix them
+                camera.resolution = (640, 480)
+                camera.start_preview()
+                s.clear()
+                s.set_element(59, rgb)
+                fps=10
+                camera.framerate=fps*2
+                camera.shutter_speed=int(1./fps*1000000)
+                time.sleep(2)
+                camera.exposure_mode='off'
+                camera.awb_mode='off'
+                camera.awb_gains=(1., 1.)
+                camera.iso=100
+                camera.stop_preview()
+
+                nempty=10
+                firstpixelid=3
+                lastpixelid=149
+
+                segger=Segmenter()
+
+                # Grab empty (no lights on) stack
+                s.clear()
+                for i in range(nempty):
+                        print("Empty %d/%d..." % (i+1, nempty))
+                        segger.add_empty(np.mean(grab_image(camera), -1))
+                s.clear()
+
+                segger.calc_empty_stats()
+
+                # Grab and segment images with each light on
+                for pixelid in range(firstpixelid, lastpixelid+1):
+                        print("Image %d/%d..." % (pixelid-firstpixelid+1, lastpixelid-firstpixelid+1))
+                        s.clear()
+                        s.set_element(pixelid, rgb)
+                        segger.segment(np.mean(grab_image(camera), -1), pixelid=pixelid)
+                s.clear()
+
+                imx, imy, self._pixelid=segger.x(), segger.y(), segger.pixelid()
+                self._x=(imx-imx.min())/(imx.max()-imx.min())
+                self._y=(imy.max()-imy)/(imx.max()-imx.min())
+
+                self._write(filename)
+
+                print("Creating calibration plot...") 
+                fig=plt.figure(figsize=(21./2.54, 29.7/2.54))
+
+                ax1=fig.add_subplot(3, 1, 1)
+                ax1.imshow(segger.meanempty(), cmap='gray')
+                ax1.set_title("Mean empty [%g to %g]" % (segger.meanempty().min(), segger.meanempty().max()))
+                ax1.plot(imx, imy, lw=0, marker='x', color='red')
+                ax1.set_xlim([0, camera.resolution[0]])
+                ax1.set_ylim([camera.resolution[1], 0])
+                ax1.set_xticks([])
+                ax1.set_yticks([])
+                ax1.plot(imx, imy, color='green')
+                ax1.plot(imx, imy, lw=0, marker='x', color='yellow')
+                for i in range(len(imx)):
+                        ax1.text(imx[i], imy[i], self._pixelid[i], fontsize=5, color='magenta')
+
+                ax2=fig.add_subplot(3, 1, 2)
+                ax2.imshow(segger.sigempty(), cmap='gray')
+                ax2.set_title("Std dev empty [%g to %g]" % (segger.sigempty().min(), segger.sigempty().max()))
+                ax2.set_xlim([0, camera.resolution[0]])
+                ax2.set_ylim([camera.resolution[1], 0])
+                ax2.set_xticks([])
+                ax2.set_yticks([])
+
+                ax3=fig.add_subplot(3, 1, 3)
+                ax3.imshow(segger.segtot(), cmap='gray')
+                ax3.set_title("Segmented")
+                ax3.set_xlim([0, camera.resolution[0]])
+                ax3.set_ylim([camera.resolution[1], 0])
+                ax3.set_xticks([])
+                ax3.set_yticks([])
+                ax3.plot(imx, imy, color='green')
+                ax3.plot(imx, imy, lw=0, marker='x', color='yellow')
+                for i in range(len(imx)):
+                        ax3.text(imx[i], imy[i], self._pixelid[i], fontsize=5, color='magenta')
+
+                pdfname=filename+'_full.pdf'
+                plt.savefig(pdfname)
+                print("Wrote '%s'" % pdfname)
+
+        def _write(self, filename):
+                obj={'x': self._x.tolist(),
+                     'y': self._y.tolist(),
+                     'pixelid': self._pixelid.tolist()}
+                with io.open(filename, 'w', encoding='utf-8') as f:
+                        f.write(unicode(json.dumps(obj, ensure_ascii=False)))
+                        print("Wrote calibration to '%s'" % filename)
+
+        def read(self, filename):
+                with io.open(filename, encoding='utf-8') as f:
+                        obj=json.loads(f.read())
+                self._x=np.array(obj['x'])
+                self._y=np.array(obj['y'])
+                self._pixelid=np.array(obj['pixelid'])
+                print("Read calibration from '%s'" % filename)
+
+        def plot(self, pdfname):
+                fig=plt.figure(figsize=(21./2.54, 29.7/2.54))
+                ax=fig.add_subplot(1, 1, 1)
+                ax.set_aspect('equal')
+                ax.set_title("NeoPixel positions")
+                ax.plot(self._x, self._y, color='green')
+                ax.plot(self._x, self._y, lw=0, marker='x', color='yellow')
+                for i in range(len(self._x)):
+                        ax.text(self._x[i], self._y[i], self._pixelid[i], fontsize=5, color='magenta')
+                ax.set_xlim([self._x.min(), self._x.max()])
+                ax.set_ylim([self._y.min(), self._y.max()])
+
+                plt.savefig(pdfname)
+                print("Wrote '%s'" % pdfname)
+
+
+def ProcessCommandLine():
+
+	"""Create an argparse parser for the command line options."""
+	parser = argparse.ArgumentParser(description=__doc__.strip())
+
+	parser.add_argument('--calibrate', action='store_true', default=False,
+                            help='Create pixel position calibration using camera')
+ 	parser.add_argument('--calibration-name', metavar='FILENAME', type=str, default=None,
+                            help='Pixel calibration name to create/read')
+	parser.add_argument('--plot', action='store_true', default=False,
+                            help='Plot the calibration')
+	parser.add_argument('--debug', action='store_true', default=False,
+			    help='Print back trace in event of exception')
+
+
+	return parser.parse_args()
+
 def Run(args):
 
         print("Initialising strip...")
-	#s=UnicornAsStrip()
-	s=NeopixelStrip()
+        #s=UnicornAsStrip()
+        s=NeopixelStrip()
 
-	rgb=50, 50, 50
+        calibration_name=args.calibration_name
+        if calibration_name is None:
+                user=os.environ.get('SUDO_USER')
+                if user is None:
+                        user=os.environ.get('USER')
+                if user is not None:
+                        calibration_name=os.path.join('/home', user, '.pixel_strip')
+        if calibration_name is None:
+                calibration_name='.pixel_strip'
 
-        print("Initialising camera...")
-	camera=picamera.PiCamera()
-	camera.hflip=True
-	camera.vflip=True
-
-        # Adjust setting while showing a spot then fix them
-        camera.resolution = (640, 480)
-        camera.start_preview()
-        s.clear()
-        s.set_element(59, rgb)
-        fps=10
-        camera.framerate=fps*2
-        camera.shutter_speed=int(1./fps*1000000)
-        #camera.analog_gain=
-        #camera.digital_gain=
-        time.sleep(2)
-        camera.exposure_mode='off'
-        camera.awb_mode='off'
-        camera.awb_gains=(1., 1.)
-        camera.iso=100
-        camera.stop_preview()
-
-        nempty=10
-        nspots=10 # 115
-
-        segger=Segmenter()
-
-        # Grab empty (no lights on) stack
-        s.clear()
-        for i in range(nempty):
-                print("Empty %d/%d..." % (i+1, nempty))
-                segger.add_empty(np.mean(grab_image(camera), -1))
-        s.clear()
-
-        segger.calc_empty_stats()
-
-        # Grab and segment images with each light on
-        for i in range(nspots):
-                print("Image %d/%d..." % (i+1, nspots))
-                s.clear()
-                pixelid=i+30
-                s.set_element(pixelid, rgb)
-                segger.segment(np.mean(grab_image(camera), -1), pixelid=pixelid)
-        s.clear()
-
-        print("Creating calibration plot...") 
-        fig=plt.figure(figsize=(21./2.54, 29.7/2.54))
-
-        x, y, ids=segger.x(), segger.y(), segger.pixelid()
-
-        ax1=fig.add_subplot(3, 1, 1)
-        ax1.imshow(segger.meanempty(), cmap='gray')
-        ax1.set_title("Mean empty [%g to %g]" % (segger.meanempty().min(), segger.meanempty().max()))
-        ax1.plot(x, y, lw=0, marker='x', color='red')
-        ax1.set_xlim([0, camera.resolution[0]])
-        ax1.set_ylim([camera.resolution[1], 0])
-        ax1.set_xticks([])
-        ax1.set_yticks([])
-        ax1.plot(x, y, color='green')
-        ax1.plot(x, y, lw=0, marker='x', color='yellow')
-        for i in range(len(x)):
-                ax1.text(x[i], y[i], ids[i], fontsize=5, color='magenta')
-
-        ax2=fig.add_subplot(3, 1, 2)
-        ax2.imshow(segger.sigempty(), cmap='gray')
-        ax2.set_title("Std dev empty [%g to %g]" % (segger.sigempty().min(), segger.sigempty().max()))
-        ax2.set_xlim([0, camera.resolution[0]])
-        ax2.set_ylim([camera.resolution[1], 0])
-        ax2.set_xticks([])
-        ax2.set_yticks([])
-
-        ax3=fig.add_subplot(3, 1, 3)
-        ax3.imshow(segger.segtot(), cmap='gray')
-        ax3.set_title("Segmented")
-        ax3.set_xlim([0, camera.resolution[0]])
-        ax3.set_ylim([camera.resolution[1], 0])
-        ax3.set_xticks([])
-        ax3.set_yticks([])
-        ax3.plot(x, y, color='green')
-        ax3.plot(x, y, lw=0, marker='x', color='yellow')
-        for i in range(len(x)):
-                ax3.text(x[i], y[i], ids[i], fontsize=5, color='magenta')
-
-        pdfname='led_positions.pdf'
-        plt.savefig(pdfname)
-        print("Wrote '%s'" % pdfname)
+        cal=Calibration()
+        if args.calibrate:
+                cal.create(s, calibration_name)
+        else:
+                cal.read(calibration_name)
+        if args.plot:
+                cal.plot(calibration_name+'_locations.pdf')
 
 if __name__ == "__main__":
 
