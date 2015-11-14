@@ -45,9 +45,14 @@ class NeopixelStrip:
                         self._strip.setPixelColor(i, neopixel.Color(0, 0, 0))
                 self._strip.show()
 
+        def show(self):
+                self._strip.show()
+
         def set_element(self, i, (r, g, b)):
                 self._strip.setPixelColor(self._ind[i], neopixel.Color(int(r), int(g), int(b)))
-		self._strip.show()
+
+        def numpixels(self):
+                return self._strip.numPixels()
 
 class UnicornAsStrip:
 	def __init__(self):
@@ -61,10 +66,12 @@ class UnicornAsStrip:
 	def clear(self):
 		unicorn.off()
 
+        def show(self):
+                unicorn.show()
+
 	def set_element(self, i, (r, g, b)):
 		ix, iy=self._pix_ind[i]
 		unicorn.set_pixel(ix, iy, int(r), int(g), int(b))
-		unicorn.show()
 
 	def scan(self, rgb=(80, 80, 80)):
 		for i in range(64):
@@ -76,7 +83,6 @@ class UnicornAsStrip:
 		for ix in range(8):
 			for iy in range(8):
 				unicorn.set_pixel(ix, iy, int(r), int(g), int(b))
-		unicorn.show()
 
 def grab_image(camera):
 	stream = io.BytesIO()
@@ -211,6 +217,7 @@ class Calibration:
                 camera.start_preview()
                 s.clear()
                 s.set_element(59, rgb)
+                s.show()
                 fps=10
                 camera.framerate=fps*2
                 camera.shutter_speed=int(1./fps*1000000)
@@ -241,6 +248,7 @@ class Calibration:
                         print("Image %d/%d..." % (pixelid-firstpixelid+1, lastpixelid-firstpixelid+1))
                         s.clear()
                         s.set_element(pixelid, rgb)
+                        s.show()
                         segger.segment(np.mean(grab_image(camera), -1), pixelid=pixelid)
                 s.clear()
 
@@ -321,6 +329,8 @@ class Calibration:
                 plt.savefig(pdfname)
                 print("Wrote '%s'" % pdfname)
 
+        def get_data(self):
+                return self._x, self._y, self._pixelid
 
 def ProcessCommandLine():
 
@@ -333,11 +343,35 @@ def ProcessCommandLine():
                             help='Pixel calibration name to create/read')
 	parser.add_argument('--plot', action='store_true', default=False,
                             help='Plot the calibration')
+	parser.add_argument('--clear', action='store_true', default=False,
+                            help='Switch of all pixels')
 	parser.add_argument('--debug', action='store_true', default=False,
 			    help='Print back trace in event of exception')
 
 
 	return parser.parse_args()
+
+class Renderer:
+        def __init__(self, strip, cal):
+                self._strip=strip
+                self._x, self._y, self._pixelid=cal.get_data()
+
+        def square(self, x1, x2, y1, y2, (r, g, b)):
+                for i in range(len(self._x)):
+                        x=self._x[i]
+                        y=self._y[i]
+                        if x>=x1 and x<x2 and y>=y1 and y<y2:
+                                self._strip.set_element(self._pixelid[i], (r, g, b))
+                self._strip.show()
+
+        def chase(self, colours, wait_ms=50, iterations=10):
+                """Movie theater light style chaser animation."""
+                for it in range(iterations):
+                        for icol in range(len(colours)):
+                                for i in range(self._strip.numpixels()):
+                                        self._strip.set_element(i, colours[(i+icol)%len(colours)])
+                                self._strip.show()
+                                time.sleep(wait_ms/1000.0)
 
 def Run(args):
 
@@ -362,6 +396,60 @@ def Run(args):
                 cal.read(calibration_name)
         if args.plot:
                 cal.plot(calibration_name+'_locations.pdf')
+        if args.clear:
+                s.clear()
+        else:
+                r=Renderer(s, cal)
+
+                rgbmax=50
+
+                r.chase([(  0  , 0, rgbmax),
+                         (0, 0, 0),
+                         (0, 0, 0)],
+                        iterations=20)
+                r.chase([(rgbmax, rgbmax, rgbmax),
+                         (0, 0, 0),
+                         (0, 0, 0)],
+                        iterations=20)
+                r.chase([(rgbmax,  0  , 0),
+                         (0, 0, 0),
+                         (0, 0, 0)],
+                        iterations=20)
+
+                nx=20
+                wait_ms=50
+                for ix in range(nx):
+                        x0=ix/(nx-1.)*0.9-0.9
+                        r.square(x0+0.10, x0+0.25, 0., 0.9, (  0  , 0, rgbmax))
+                        r.square(x0+0.25, x0+0.40, 0., 0.9, (rgbmax, rgbmax, rgbmax))
+                        r.square(x0+0.40, x0+0.55, 0., 0.9, (rgbmax,   0,   0))
+                        r.square(x0+0.55, x0+0.70, 0., 0.9, (  0  , 0, rgbmax))
+                        r.square(x0+0.70, x0+0.85, 0., 0.9, (rgbmax, rgbmax, rgbmax))
+                        r.square(x0+0.85, x0+1.00, 0., 0.9, (rgbmax,   0,   0))
+                        time.sleep(wait_ms/1000.0)
+
+                s.clear()
+
+                nx=20
+                wait_ms=50
+                for ix in range(nx):
+                        x0=ix/(nx-1.)*0.9-0.9
+                        r.square(x0+0.10, x0+0.40, 0., 0.9, (  0  , 0, rgbmax))
+                        r.square(x0+0.40, x0+0.70, 0., 0.9, (rgbmax, rgbmax, rgbmax))
+                        r.square(x0+0.70, x0+1.00, 0., 0.9, (rgbmax,   0,   0))
+                        time.sleep(wait_ms/1000.0)
+
+                time.sleep(5000/1000.0)
+
+                # Fade
+                #wait_ms=10
+                #for i in range(0, rgbmax+1, 2):
+                #        r.square(0.10, 0.40, 0., 0.9, (    0,     0, rgbmax-i))
+                #        r.square(0.40, 0.70, 0., 0.9, (rgbmax-i, rgbmax-i, rgbmax-i))
+                #        r.square(0.70, 1.00, 0., 0.9, (rgbmax-i  ,   0,     0))
+                #        time.sleep(wait_ms/1000.0)
+
+                #s.clear()
 
 if __name__ == "__main__":
 
