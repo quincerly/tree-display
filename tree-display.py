@@ -112,72 +112,80 @@ def grab_image(camera):
 class Segmenter:
 	def __init__(self):
 
-                self._imscale=1./255
                 self._nempty=0
+                self._prevempty=None
                 self._totempty=None
-                self._totempty2=None
+                self._totdevempty2=None
                 self._segtot=None
                 self._cx=[]
                 self._cy=[]
+                self._pixelid=[]
 
         def add_empty(self, empty):
 
                 if self._nempty==0:
-                        self._nempty=1
-                        self._totempty=empty*self._imscale
-                        self._totempty2=empty*empty*self._imscale*self._imscale
+                        self._totempty=empty
+                        self._totdevempty2=np.zeros_like(empty)
                 else:
-                        self._nempty+=1
-                        self._totempty+=empty*self._imscale
-                        self._totempty2+=empty*empty*self._imscale*self._imscale
+                        self._totempty+=empty
+                        self._totdevempty2+=(empty-self._prevempty)**2
+
+                self._prevempty=empty
+                self._nempty+=1
 
         def calc_empty_stats(self):
+
+                if self._nempty<2:
+                        raise RuntimeError("Add least two empty images required")
 
                 # Per-pixel average empty image
                 self._meanempty=self._totempty*1./self._nempty
 
-                # Per-pixel standard deviation empty image (need to keep an eye
-                # out for precision issues calculating this way (from |x|^2 and |x^2|)
-                #self._sigempty=np.sqrt(self._totempty2*1./self._nempty-self._meanempty*self._meanempty)
+                # Per-pixel standard deviation of empty image
+                # Estimate from sq difference between subsequent frames
+                self._sigempty=np.sqrt(self._totdevempty2/(self._nempty-1)/2.)
 
                 # Set zero values to minimum non-zero value
-                #self._sigempty[np.where(self._sigempty==0)]=self._sigempty[np.where(self._sigempty>0)].min()
+                self._sigempty[np.where(self._sigempty==0)]=self._sigempty[np.where(self._sigempty>0)].min()
 
                 # Save memory
                 del self._totempty
+                del self._totdevempty2
                 #del self._totempty2
 
-	def segmentold(self, im, nsig=0.5):
-                ndev=(im*self._imscale-self._meanempty)/self._sigempty
-		on=np.where(ndev>nsig)
-		off=np.where(ndev<=nsig)
-		segim=im*0.
-		segim[on]=1.
-		segim[off]=0.
-                if self._segtot is None:
-                        self._segtot=segim
-                else:
-                        self._segtot+=segim
-                cx, cy=centroid(segim)
-                self._cx.append(cx)
-                self._cy.append(cy)
+        def normdev(self, im):
+		return (im-self._meanempty)/self._sigempty
 
-	def segment(self, im, frac=0.99):
-                dev=im*self._imscale-self._meanempty
-                thresh=np.sort(dev.flatten())[int(frac*len(dev))]
-		on=np.where(dev>thresh)
-		off=np.where(dev<=thresh)
-		segim=im*0.
-		segim[on]=1.
-		segim[off]=0.
-                if self._segtot is None:
-                        self._segtot=segim
-                else:
-                        self._segtot+=segim
-                cx, cy=centroid(segim)
-                self._cx.append(cx)
-                self._cy.append(cy)
+	def segment(self, im, pixelid=None, nsig=3, ndevquantile=0.9995):
 
+                # Calculate per pixel deviation from mean empty / per pixel std dev in empty
+		ndev=self.normdev(im)
+
+                # Identify thresh, the value below which a fraction ndevquantile of the values in ndev lie
+                sfndev=np.sort(ndev.flatten())
+                thresh=sfndev[int(np.floor(ndevquantile*len(sfndev)))]
+
+                # Identify which pixels in ndev are greater than thresh and nsig
+		on=np.where((ndev>thresh) & (ndev>nsig))
+
+                if len(on[0]):
+
+                        # Create an image which is 1 for points in 'on', 0 elsewhere
+                        segim=np.zeros_like(im)
+                        segim[on]=1.
+
+                        # Calculate the centroid of the image and store it
+                        cx, cy=centroid(segim)
+                        self._cx.append(cx)
+                        self._cy.append(cy)
+                        self._pixelid.append(pixelid)
+
+                        # Add it to the total segmented image
+                        if self._segtot is None:
+                                self._segtot=segim
+                        else:
+                                self._segtot+=segim
+                        return segim
 
         def meanempty(self):
                 return self._meanempty
@@ -194,49 +202,8 @@ class Segmenter:
         def y(self):
                 return self._cy
 
-class SegmenterOld:
-	def __init__(self, emptystack):
-
-		nempty=len(emptystack)
-                #print("segger nempty %d" % nempty)
-
-		# Calculate average empty image
-		meanempty=emptystack[0]*0.
-		for i in range(nempty):
-                        #print("segger empty %d %g to %g" % (i, emptystack[i].min(), emptystack[i].max()))
-			meanempty+=emptystack[i]
-		meanempty=meanempty*1./nempty
-                #print("segger meanempty %g to %g" % (meanempty.min(), meanempty.max()))
-		self._meanempty=meanempty
-
-		# Calculate emptystack std dev image
-		sigempty=emptystack[0]*0.
-		for i in range(nempty):
-			dev=emptystack[i]-meanempty
-			sigempty+=dev*dev
-		sigempty=np.sqrt(sigempty/nempty)
-		sigempty[np.where(sigempty==0)]=sigempty[np.where(sigempty>0)].min() # Set zero values to minimum non-zero value
-                #print("segger sigempty %g to %g" % (sigempty.min(), sigempty.max()))
-		self._sigempty=sigempty
-
-        def meanempty(self):
-                return self._meanempty
-
-        def sigempty(self):
-                return self._sigempty
-
-        def normdev(self, im):
-		return (im-self._meanempty)/self._sigempty
-
-	def segment(self, im, nsig=0.5):
-		ndev=self.normdev(im)
-                #print("segger normdev %g to %g" % (ndev.min(), ndev.max()))
-		on=np.where(ndev>nsig)
-		off=np.where(ndev<=nsig)
-		segim=im*0.
-		segim[on]=1.
-		segim[off]=0.
-		return segim
+        def pixelid(self):
+                return self._pixelid
 
 def centroid(image):
         imh, imw=image.shape
@@ -249,23 +216,22 @@ def centroid(image):
 
 def Run(args):
 
+        print("Initialising strip...")
 	#s=UnicornAsStrip()
 	s=NeopixelStrip()
-        #s.shuffle(0)
 
 	rgb=50, 50, 50
 
+        print("Initialising camera...")
 	camera=picamera.PiCamera()
 	camera.hflip=True
 	camera.vflip=True
-
-	#s.scan()
 
         # Adjust setting while showing a spot then fix them
         camera.resolution = (640, 480)
         camera.start_preview()
         s.clear()
-        s.set_element(0, rgb)
+        s.set_element(59, rgb)
         fps=10
         camera.framerate=fps*2
         camera.shutter_speed=int(1./fps*1000000)
@@ -278,8 +244,8 @@ def Run(args):
         camera.iso=100
         camera.stop_preview()
 
-        nempty=1
-        nspots=10
+        nempty=10
+        nspots=10 # 115
 
         segger=Segmenter()
 
@@ -296,33 +262,52 @@ def Run(args):
         for i in range(nspots):
                 print("Image %d/%d..." % (i+1, nspots))
                 s.clear()
-                s.set_element(i+70, rgb)
-                segger.segment(np.mean(grab_image(camera), -1))
+                pixelid=i+30
+                s.set_element(pixelid, rgb)
+                segger.segment(np.mean(grab_image(camera), -1), pixelid=pixelid)
         s.clear()
 
+        print("Creating calibration plot...") 
         fig=plt.figure(figsize=(21./2.54, 29.7/2.54))
+
+        x, y, ids=segger.x(), segger.y(), segger.pixelid()
 
         ax1=fig.add_subplot(3, 1, 1)
         ax1.imshow(segger.meanempty(), cmap='gray')
         ax1.set_title("Mean empty [%g to %g]" % (segger.meanempty().min(), segger.meanempty().max()))
-        ax1.plot(segger.x(), segger.y(), lw=0, marker='x', color='red')
+        ax1.plot(x, y, lw=0, marker='x', color='red')
+        ax1.set_xlim([0, camera.resolution[0]])
+        ax1.set_ylim([camera.resolution[1], 0])
         ax1.set_xticks([])
         ax1.set_yticks([])
+        ax1.plot(x, y, color='green')
+        ax1.plot(x, y, lw=0, marker='x', color='yellow')
+        for i in range(len(x)):
+                ax1.text(x[i], y[i], ids[i], fontsize=5, color='magenta')
 
         ax2=fig.add_subplot(3, 1, 2)
         ax2.imshow(segger.sigempty(), cmap='gray')
         ax2.set_title("Std dev empty [%g to %g]" % (segger.sigempty().min(), segger.sigempty().max()))
+        ax2.set_xlim([0, camera.resolution[0]])
+        ax2.set_ylim([camera.resolution[1], 0])
         ax2.set_xticks([])
         ax2.set_yticks([])
 
         ax3=fig.add_subplot(3, 1, 3)
         ax3.imshow(segger.segtot(), cmap='gray')
         ax3.set_title("Segmented")
+        ax3.set_xlim([0, camera.resolution[0]])
+        ax3.set_ylim([camera.resolution[1], 0])
         ax3.set_xticks([])
         ax3.set_yticks([])
-        ax3.plot(segger.x(), segger.y(), lw=0, marker='x', color='red')
+        ax3.plot(x, y, color='green')
+        ax3.plot(x, y, lw=0, marker='x', color='yellow')
+        for i in range(len(x)):
+                ax3.text(x[i], y[i], ids[i], fontsize=5, color='magenta')
 
-        plt.savefig('led_positions.pdf')
+        pdfname='led_positions.pdf'
+        plt.savefig(pdfname)
+        print("Wrote '%s'" % pdfname)
 
 if __name__ == "__main__":
 
