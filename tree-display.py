@@ -39,11 +39,11 @@ class NeopixelStrip:
                 np.random.seed(seed)
 		np.random.shuffle(self._ind)
 
-        def clear(self):
+        def clear(self, show=True):
                 """Set all off"""
                 for i in range(self._strip.numPixels()):
                         self._strip.setPixelColor(i, neopixel.Color(0, 0, 0))
-                self._strip.show()
+                if show: self._strip.show()
 
         def show(self):
                 self._strip.show()
@@ -229,7 +229,7 @@ class Calibration:
                 camera.stop_preview()
 
                 nempty=10
-                firstpixelid=3
+                firstpixelid=0
                 lastpixelid=149
 
                 segger=Segmenter()
@@ -356,13 +356,13 @@ class Renderer:
                 self._strip=strip
                 self._x, self._y, self._pixelid=cal.get_data()
 
-        def square(self, x1, x2, y1, y2, (r, g, b)):
+        def square(self, x1, x2, y1, y2, (r, g, b), show=True):
                 for i in range(len(self._x)):
                         x=self._x[i]
                         y=self._y[i]
                         if x>=x1 and x<x2 and y>=y1 and y<y2:
                                 self._strip.set_element(self._pixelid[i], (r, g, b))
-                self._strip.show()
+                if show: self._strip.show()
 
         def chase(self, colours, wait_ms=50, iterations=10):
                 """Movie theater light style chaser animation."""
@@ -372,6 +372,154 @@ class Renderer:
                                         self._strip.set_element(i, colours[(i+icol)%len(colours)])
                                 self._strip.show()
                                 time.sleep(wait_ms/1000.0)
+
+        def random(self, rgbs, show=True):
+                for i in range(len(self._x)):
+                        self._strip.set_element(self._pixelid[i], rgbs[np.random.randint(0, len(rgbs))])
+                if show: self._strip.show()
+
+        def apply_rgb_fn_xy(self, rgb_fn, show=True):
+                rgbs=rgb_fn(self._x, self._y)
+                for i in range(len(self._x)):
+                        self._strip.set_element(self._pixelid[i], rgbs[i])
+                #        self._strip.set_element(self._pixelid[i], rgb_fn(self._x[i], self._y[i]))
+                if show: self._strip.show()
+
+def Demo1(r, s):
+
+        rgbmax=50
+
+        r.chase([(  0  , 0, rgbmax),
+                 (0, 0, 0),
+                 (0, 0, 0)],
+                iterations=20)
+        r.chase([(rgbmax, rgbmax, rgbmax),
+                 (0, 0, 0),
+                 (0, 0, 0)],
+                iterations=20)
+        r.chase([(rgbmax,  0  , 0),
+                 (0, 0, 0),
+                 (0, 0, 0)],
+                iterations=20)
+
+        nx=20
+        wait_ms=50
+        for ix in range(nx):
+                x0=ix/(nx-1.)*0.9-0.9
+                r.square(x0+0.10, x0+0.25, 0., 0.9, (  0  , 0, rgbmax))
+                r.square(x0+0.25, x0+0.40, 0., 0.9, (rgbmax, rgbmax, rgbmax))
+                r.square(x0+0.40, x0+0.55, 0., 0.9, (rgbmax,   0,   0))
+                r.square(x0+0.55, x0+0.70, 0., 0.9, (  0  , 0, rgbmax))
+                r.square(x0+0.70, x0+0.85, 0., 0.9, (rgbmax, rgbmax, rgbmax))
+                r.square(x0+0.85, x0+1.00, 0., 0.9, (rgbmax,   0,   0))
+                time.sleep(wait_ms/1000.0)
+
+        s.clear()
+
+        nx=20
+        wait_ms=50
+        for ix in range(nx):
+                x0=ix/(nx-1.)*0.9-0.9
+                r.square(x0+0.10, x0+0.40, 0., 0.9, (  0  , 0, rgbmax))
+                r.square(x0+0.40, x0+0.70, 0., 0.9, (rgbmax, rgbmax, rgbmax))
+                r.square(x0+0.70, x0+1.00, 0., 0.9, (rgbmax,   0,   0))
+                time.sleep(wait_ms/1000.0)
+
+        time.sleep(5000/1000.0)
+
+        # Fade
+        #wait_ms=10
+        #for i in range(0, rgbmax+1, 2):
+        #        r.square(0.10, 0.40, 0., 0.9, (    0,     0, rgbmax-i))
+        #        r.square(0.40, 0.70, 0., 0.9, (rgbmax-i, rgbmax-i, rgbmax-i))
+        #        r.square(0.70, 1.00, 0., 0.9, (rgbmax-i  ,   0,     0))
+        #        time.sleep(wait_ms/1000.0)
+
+        #s.clear()
+
+def Demo2(r, s):
+
+        rgbmax=50
+
+        xmin=0.
+        xmax=1.00
+        ymin=0.
+        ymax=0.65
+        w=xmax-xmin
+        h=ymax-ymin
+
+        def foldphase(phase):
+                return phase-np.floor(phase)
+
+        rgbs=[]
+        rgbs.append((1, 0, 0))
+        #rgbs.append((0, 0, 0))
+        rgbs.append((0, 1, 0))
+        #rgbs.append((0, 0, 0))
+        rgbs.append((0, 1, 1))
+        #rgbs.append((0, 0, 0))
+        rgbs.append((1, 1, 0))
+        #rgbs.append((0, 0, 0))
+        rgbs.append((1, 0, 1))
+        #rgbs.append((0, 0, 0))
+
+        cphase=np.linspace(0, len(rgbs)-1, len(rgbs))/len(rgbs)
+        rs=[]
+        gs=[]
+        bs=[]
+        for rgb in rgbs:
+                rs.append(rgb[0])
+                gs.append(rgb[1])
+                bs.append(rgb[2])
+
+        class RGBFn:
+                def __init__(self, phase=0., direction='y'):
+                        self._phase=phase
+                        self._direction=direction
+                def set_direction(self, direction):
+                        self._direction=direction
+                def set_phase(self, phase):
+                        self._phase=phase
+                def rgb_fn_phase(self, phase):
+                        return (np.round(np.interp(foldphase(phase), cphase, rs)*rgbmax),
+                                np.round(np.interp(foldphase(phase), cphase, gs)*rgbmax),
+                                np.round(np.interp(foldphase(phase), cphase, bs)*rgbmax))
+                def __call__(self, x, y):
+                        if self._direction=='y':
+                                return zip(*self.rgb_fn_phase((y-ymin)/(ymax-ymin)+self._phase))
+                        elif self._direction=='x':
+                                return zip(*self.rgb_fn_phase((x-xmin)/(xmax-xmin)+self._phase))
+                        else:
+                                raise RuntimeError("Unknown direction '%s'" % self._direction)
+
+        randrgbs=map(lambda rgb: (rgb[0]*rgbmax, rgb[1]*rgbmax, rgb[2]*rgbmax), rgbs)
+        wait_ms=50.
+        for i in range(50):
+                r.random(randrgbs)
+                time.sleep(wait_ms/1000.0)
+
+        nt=20
+        wait_ms=25.
+        rgbfn=RGBFn()
+        nx=5
+        ny=5
+        while True:
+                rgbfn.set_direction('y')
+                for i in range(ny):
+                        for it in range(nt):
+                                rgbfn.set_phase(it*1./nt)
+                                r.apply_rgb_fn_xy(rgbfn)
+                                time.sleep(wait_ms/1000.0)
+                rgbfn.set_direction('x')
+                for i in range(nx):
+                        for it in range(nt):
+                                rgbfn.set_phase(it*1./nt)
+                                r.apply_rgb_fn_xy(rgbfn)
+                                time.sleep(wait_ms/1000.0)
+
+        s.clear()
+
+        #time.sleep(wait_ms/1000.0)
 
 def Run(args):
 
@@ -400,56 +548,8 @@ def Run(args):
                 s.clear()
         else:
                 r=Renderer(s, cal)
-
-                rgbmax=50
-
-                r.chase([(  0  , 0, rgbmax),
-                         (0, 0, 0),
-                         (0, 0, 0)],
-                        iterations=20)
-                r.chase([(rgbmax, rgbmax, rgbmax),
-                         (0, 0, 0),
-                         (0, 0, 0)],
-                        iterations=20)
-                r.chase([(rgbmax,  0  , 0),
-                         (0, 0, 0),
-                         (0, 0, 0)],
-                        iterations=20)
-
-                nx=20
-                wait_ms=50
-                for ix in range(nx):
-                        x0=ix/(nx-1.)*0.9-0.9
-                        r.square(x0+0.10, x0+0.25, 0., 0.9, (  0  , 0, rgbmax))
-                        r.square(x0+0.25, x0+0.40, 0., 0.9, (rgbmax, rgbmax, rgbmax))
-                        r.square(x0+0.40, x0+0.55, 0., 0.9, (rgbmax,   0,   0))
-                        r.square(x0+0.55, x0+0.70, 0., 0.9, (  0  , 0, rgbmax))
-                        r.square(x0+0.70, x0+0.85, 0., 0.9, (rgbmax, rgbmax, rgbmax))
-                        r.square(x0+0.85, x0+1.00, 0., 0.9, (rgbmax,   0,   0))
-                        time.sleep(wait_ms/1000.0)
-
-                s.clear()
-
-                nx=20
-                wait_ms=50
-                for ix in range(nx):
-                        x0=ix/(nx-1.)*0.9-0.9
-                        r.square(x0+0.10, x0+0.40, 0., 0.9, (  0  , 0, rgbmax))
-                        r.square(x0+0.40, x0+0.70, 0., 0.9, (rgbmax, rgbmax, rgbmax))
-                        r.square(x0+0.70, x0+1.00, 0., 0.9, (rgbmax,   0,   0))
-                        time.sleep(wait_ms/1000.0)
-
-                time.sleep(5000/1000.0)
-
-                # Fade
-                #wait_ms=10
-                #for i in range(0, rgbmax+1, 2):
-                #        r.square(0.10, 0.40, 0., 0.9, (    0,     0, rgbmax-i))
-                #        r.square(0.40, 0.70, 0., 0.9, (rgbmax-i, rgbmax-i, rgbmax-i))
-                #        r.square(0.70, 1.00, 0., 0.9, (rgbmax-i  ,   0,     0))
-                #        time.sleep(wait_ms/1000.0)
-
-                #s.clear()
+                #Demo1(r, s)
+                Demo2(r, s)
 
 if __name__ == "__main__":
 
