@@ -4,6 +4,8 @@
 Neopixel strip location registration and control
 '''
 
+from __future__ import print_function
+
 import neopixel
 #import unicornhat as unicorn
 import time
@@ -19,6 +21,8 @@ import picamera
 import cv2
 import io
 import json
+
+import treebuttons
 
 class NeopixelStrip:
         def __init__(self,
@@ -439,6 +443,20 @@ def Demo1(r, s):
 
 def Demo2(r, s):
 
+        buttons=treebuttons.TreeHatButtons()
+
+        def handle_buttons():
+                event=buttons.check_state()
+                if event is not None:
+                    if event['type']=='release' and buttons.all_on(event['prevcode']):
+                        print("Quitting")
+                        s.clear()
+                        exit()
+                    elif event['type']=='release':
+                        if event['tsec']>1:
+                            print('long ', end='')
+                        print('press '+buttons.state_string(event['prevcode']-event['code'], present_only=True))
+
         rgbmax=50
 
         xmin=0.
@@ -507,12 +525,14 @@ def Demo2(r, s):
                 rgbfn.set_direction('y')
                 for i in range(ny):
                         for it in range(nt):
+                                handle_buttons()
                                 rgbfn.set_phase(it*1./nt)
                                 r.apply_rgb_fn_xy(rgbfn)
                                 time.sleep(wait_ms/1000.0)
                 rgbfn.set_direction('x')
                 for i in range(nx):
                         for it in range(nt):
+                                handle_buttons()
                                 rgbfn.set_phase(it*1./nt)
                                 r.apply_rgb_fn_xy(rgbfn)
                                 time.sleep(wait_ms/1000.0)
@@ -563,6 +583,6 @@ if __name__ == "__main__":
 
 		print("Fatal error: "+str(err))
 		if args.debug:
-			print "\n--- Failure -------------------------------------"
+			print("\n--- Failure -------------------------------------")
 			traceback.print_exc(file=sys.stdout)
-			print "-------------------------------------------------------"
+			print("-------------------------------------------------------")
