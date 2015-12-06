@@ -21,8 +21,10 @@ import picamera
 import cv2
 import io
 import json
-
 import treebuttons
+import subprocess
+
+buttons=treebuttons.TreeHatButtons()
 
 class NeopixelStrip:
         def __init__(self,
@@ -43,10 +45,15 @@ class NeopixelStrip:
                 np.random.seed(seed)
 		np.random.shuffle(self._ind)
 
-        def clear(self, show=True):
+        def clear(self, rgb=None, show=True):
                 """Set all off"""
+                if rgb is None:
+                        colour=neopixel.Color(0, 0, 0)
+                else:
+                        r, g, b=rgb
+                        colour=neopixel.Color(int(r), int(g), int(b))
                 for i in range(self._strip.numPixels()):
-                        self._strip.setPixelColor(i, neopixel.Color(0, 0, 0))
+                        self._strip.setPixelColor(i, colour)
                 if show: self._strip.show()
 
         def show(self):
@@ -207,9 +214,7 @@ class Calibration:
         def __init__(self):
                 self._x, self._y, self._pixelid=None, None, None
 
-        def create(self, s, filename):
-
-                rgb=50, 50, 50
+        def create(self, s, filename, rgb=(50, 50, 50)):
 
                 print("Initialising camera...")
                 camera=picamera.PiCamera()
@@ -343,6 +348,8 @@ def ProcessCommandLine():
 
 	parser.add_argument('--calibrate', action='store_true', default=False,
                             help='Create pixel position calibration using camera')
+	parser.add_argument('--calibrate-rgb', metavar='R,G,B', type=str, default='50,50,50',
+                            help='Calibration RGB value 0-255,0-255,0-255')
  	parser.add_argument('--calibration-name', metavar='FILENAME', type=str, default=None,
                             help='Pixel calibration name to create/read')
 	parser.add_argument('--plot', action='store_true', default=False,
@@ -382,87 +389,103 @@ class Renderer:
                         self._strip.set_element(self._pixelid[i], rgbs[np.random.randint(0, len(rgbs))])
                 if show: self._strip.show()
 
+        def ymax(self):
+                return max(self._y)
+
         def apply_rgb_fn_xy(self, rgb_fn, show=True):
                 rgbs=rgb_fn(self._x, self._y)
                 for i in range(len(self._x)):
                         self._strip.set_element(self._pixelid[i], rgbs[i])
-                #        self._strip.set_element(self._pixelid[i], rgb_fn(self._x[i], self._y[i]))
                 if show: self._strip.show()
 
-def Demo1(r, s):
-
-        rgbmax=50
-
-        r.chase([(  0  , 0, rgbmax),
-                 (0, 0, 0),
-                 (0, 0, 0)],
-                iterations=20)
-        r.chase([(rgbmax, rgbmax, rgbmax),
-                 (0, 0, 0),
-                 (0, 0, 0)],
-                iterations=20)
-        r.chase([(rgbmax,  0  , 0),
-                 (0, 0, 0),
-                 (0, 0, 0)],
-                iterations=20)
-
-        nx=20
-        wait_ms=50
-        for ix in range(nx):
-                x0=ix/(nx-1.)*0.9-0.9
-                r.square(x0+0.10, x0+0.25, 0., 0.9, (  0  , 0, rgbmax))
-                r.square(x0+0.25, x0+0.40, 0., 0.9, (rgbmax, rgbmax, rgbmax))
-                r.square(x0+0.40, x0+0.55, 0., 0.9, (rgbmax,   0,   0))
-                r.square(x0+0.55, x0+0.70, 0., 0.9, (  0  , 0, rgbmax))
-                r.square(x0+0.70, x0+0.85, 0., 0.9, (rgbmax, rgbmax, rgbmax))
-                r.square(x0+0.85, x0+1.00, 0., 0.9, (rgbmax,   0,   0))
-                time.sleep(wait_ms/1000.0)
-
-        s.clear()
-
-        nx=20
-        wait_ms=50
-        for ix in range(nx):
-                x0=ix/(nx-1.)*0.9-0.9
-                r.square(x0+0.10, x0+0.40, 0., 0.9, (  0  , 0, rgbmax))
-                r.square(x0+0.40, x0+0.70, 0., 0.9, (rgbmax, rgbmax, rgbmax))
-                r.square(x0+0.70, x0+1.00, 0., 0.9, (rgbmax,   0,   0))
-                time.sleep(wait_ms/1000.0)
-
-        time.sleep(5000/1000.0)
-
-        # Fade
-        #wait_ms=10
-        #for i in range(0, rgbmax+1, 2):
-        #        r.square(0.10, 0.40, 0., 0.9, (    0,     0, rgbmax-i))
-        #        r.square(0.40, 0.70, 0., 0.9, (rgbmax-i, rgbmax-i, rgbmax-i))
-        #        r.square(0.70, 1.00, 0., 0.9, (rgbmax-i  ,   0,     0))
-        #        time.sleep(wait_ms/1000.0)
-
-        #s.clear()
-
-def Demo2(r, s):
-
-        buttons=treebuttons.TreeHatButtons()
-
-        def handle_buttons():
-                event=buttons.check_state()
-                if event is not None:
-                    if event['type']=='release' and buttons.all_on(event['prevcode']):
-                        print("Quitting")
-                        s.clear()
-                        exit()
-                    elif event['type']=='release':
+def HandleButtons(s):
+        event=buttons.check_state()
+        if event is not None:
+                if event['type']=='release' and buttons.buttons_on(['medium', 'small'], event['prevcode']):
+                        if event['tsec']>1 and event['tsec']<5:
+                                # Quit and halt machine - press and hold medium and small for 1-5 sec
+                                print("Quitting")
+                                s.clear(rgb=(100, 50, 0))
+                                time.sleep(5)
+                                s.clear()
+                                exit()
+                        elif event['tsec']>=5:
+                                # Quit and halt machine - press and hold medium and small for >=5 sec
+                                print("Quitting and halting")
+                                s.clear(rgb=(100, 0, 0))
+                                time.sleep(5)
+                                s.clear()
+                                subprocess.call(['sudo', 'halt'])
+                                exit()
+                elif event['type']=='release' and buttons.buttons_on(["medium"], event['prevcode']):
+                        # Pause - pressed and released medium button. Wait for another press and release to resume
+                        buttons.wait_for_buttons(['medium'], eventtype='release')
+                elif event['type']=='release' and buttons.buttons_on(["small"], event['prevcode']):
+                        if event['tsec']<1:
+                                # Blank - pressed and released medium button for <1sec. Wait for another press and release to resume
+                                s.clear()
+                                buttons.wait_for_buttons(['small'], eventtype='release')
+                        else:
+                                # Held medium button for >=1 sec - end this display and move to next
+                                return False
+                elif event['type']=='release':
                         if event['tsec']>1:
-                            print('long ', end='')
+                                print('long ', end='')
                         print('press '+buttons.state_string(event['prevcode']-event['code'], present_only=True))
 
+        return True
+
+def ButtonsSleep(s, delaysec):
+        dt=0.01 # Length of delay sub-steps
+        t=time.time()
+        while True:
+                if not HandleButtons(s):
+                        return False
+                if time.time()-t>delaysec:
+                        return True
+                time.sleep(dt)
+
+def Vive(r, s):
+
         rgbmax=50
+
+        while True:
+
+                nx=20
+                wait_ms=50
+                for ix in range(nx):
+                        x0=ix/(nx-1.)*0.9-0.9
+                        r.square(x0+0.10, x0+0.25, 0., r.ymax(), (  0  , 0, rgbmax))
+                        r.square(x0+0.25, x0+0.40, 0., r.ymax(), (rgbmax, rgbmax, rgbmax))
+                        r.square(x0+0.40, x0+0.55, 0., r.ymax(), (rgbmax,   0,   0))
+                        r.square(x0+0.55, x0+0.70, 0., r.ymax(), (  0  , 0, rgbmax))
+                        r.square(x0+0.70, x0+0.85, 0., r.ymax(), (rgbmax, rgbmax, rgbmax))
+                        r.square(x0+0.85, x0+1.00, 0., r.ymax(), (rgbmax,   0,   0))
+                        if not ButtonsSleep(s, wait_ms/1000.0): return
+
+                s.clear()
+
+                nx=20
+                wait_ms=50
+                for ix in range(nx):
+                        x0=ix/(nx-1.)*0.9-0.9
+                        r.square(x0+0.10, x0+0.40, 0., r.ymax(), (  0  , 0, rgbmax))
+                        r.square(x0+0.40, x0+0.70, 0., r.ymax(), (rgbmax, rgbmax, rgbmax))
+                        r.square(x0+0.70, x0+1.00, 0., r.ymax(), (rgbmax,   0,   0))
+                        if not ButtonsSleep(s, wait_ms/1000.0): return
+
+def Rainbow(r, s,
+            fps=20.,
+            periodsec=2.,
+            ncycles=0.,
+            direction='x',
+            nrainbows=1.,
+            rgbmax=100):
 
         xmin=0.
         xmax=1.00
         ymin=0.
-        ymax=0.65
+        ymax=r.ymax()
         w=xmax-xmin
         h=ymax-ymin
 
@@ -471,29 +494,33 @@ def Demo2(r, s):
 
         rgbs=[]
         rgbs.append((1, 0, 0))
-        #rgbs.append((0, 0, 0))
-        rgbs.append((0, 1, 0))
-        #rgbs.append((0, 0, 0))
-        rgbs.append((0, 1, 1))
-        #rgbs.append((0, 0, 0))
+        rgbs.append((1, 0.5, 0))
         rgbs.append((1, 1, 0))
-        #rgbs.append((0, 0, 0))
+        rgbs.append((0, 1, 0))
+        rgbs.append((0, 0, 1))
+        rgbs.append((0.5, 0, 1))
         rgbs.append((1, 0, 1))
-        #rgbs.append((0, 0, 0))
 
-        cphase=np.linspace(0, len(rgbs)-1, len(rgbs))/len(rgbs)
+        #cphase=np.linspace(0, len(rgbs)-1, len(rgbs))/len(rgbs)
+
+        # Add end/start to start/ end to improve interpolation at end point
+        rgbs.insert(0, rgbs[-1])
+        rgbs.append(rgbs[1])
+        cphase=np.linspace(-1, len(rgbs)+1, len(rgbs))/len(rgbs)
+
         rs=[]
         gs=[]
         bs=[]
         for rgb in rgbs:
-                rs.append(rgb[0])
-                gs.append(rgb[1])
-                bs.append(rgb[2])
+                rs.append(1.*rgb[0])
+                gs.append(1.*rgb[1])
+                bs.append(1.*rgb[2])
 
         class RGBFn:
-                def __init__(self, phase=0., direction='y'):
+                def __init__(self, phase=0., direction='y', fac=1.):
                         self._phase=phase
                         self._direction=direction
+                        self._fac=fac
                 def set_direction(self, direction):
                         self._direction=direction
                 def set_phase(self, phase):
@@ -504,42 +531,46 @@ def Demo2(r, s):
                                 np.round(np.interp(foldphase(phase), cphase, bs)*rgbmax))
                 def __call__(self, x, y):
                         if self._direction=='y':
-                                return zip(*self.rgb_fn_phase((y-ymin)/(ymax-ymin)+self._phase))
+                                return zip(*self.rgb_fn_phase(self._fac*(y-ymin)/(ymax-ymin)+self._phase))
                         elif self._direction=='x':
-                                return zip(*self.rgb_fn_phase((x-xmin)/(xmax-xmin)+self._phase))
+                                return zip(*self.rgb_fn_phase(self._fac*(x-xmin)/(xmax-xmin)+self._phase))
                         else:
                                 raise RuntimeError("Unknown direction '%s'" % self._direction)
 
-        randrgbs=map(lambda rgb: (rgb[0]*rgbmax, rgb[1]*rgbmax, rgb[2]*rgbmax), rgbs)
-        wait_ms=50.
-        for i in range(50):
-                r.random(randrgbs)
-                time.sleep(wait_ms/1000.0)
+        rgbfn=RGBFn(fac=nrainbows)
 
-        nt=20
-        wait_ms=25.
-        rgbfn=RGBFn()
-        nx=5
-        ny=5
+        phase=0
+        t0=time.time()
+
+        rgbfn.set_direction(direction)
+        while ncycles==0 or phase<ncycles:
+                phase=(time.time()-t0)/periodsec
+                rgbfn.set_phase(phase)
+                r.apply_rgb_fn_xy(rgbfn)
+                if not ButtonsSleep(s, 1./fps): return
+
+def Random(s, pausesec=1., skip=2):
+
+        rgbs=[]
+        rgbs.append((1, 0, 0))
+        rgbs.append((1, 0.5, 0))
+        rgbs.append((1, 1, 0))
+        rgbs.append((0, 1, 0))
+        rgbs.append((0.5, 0, 1))
+        rgbs.append((1, 0, 1))
+        rgbs.append((0, 1, 1))
+        rgbmax=100
+
         while True:
-                rgbfn.set_direction('y')
-                for i in range(ny):
-                        for it in range(nt):
-                                handle_buttons()
-                                rgbfn.set_phase(it*1./nt)
-                                r.apply_rgb_fn_xy(rgbfn)
-                                time.sleep(wait_ms/1000.0)
-                rgbfn.set_direction('x')
-                for i in range(nx):
-                        for it in range(nt):
-                                handle_buttons()
-                                rgbfn.set_phase(it*1./nt)
-                                r.apply_rgb_fn_xy(rgbfn)
-                                time.sleep(wait_ms/1000.0)
-
-        s.clear()
-
-        #time.sleep(wait_ms/1000.0)
+                s.clear()
+                np.random.shuffle(rgbs)
+                i=0
+                for ipix in range(i%skip, s.numpixels(), skip):
+                        s.set_element(ipix,
+                                      map(lambda v: v*rgbmax, rgbs[i%len(rgbs)]))
+                        i+=1
+                s.show()
+                if not ButtonsSleep(s, pausesec): return
 
 def Run(args):
 
@@ -559,7 +590,10 @@ def Run(args):
 
         cal=Calibration()
         if args.calibrate:
-                cal.create(s, calibration_name)
+                cal_rgb=map(int, args.calibrate_rgb.split(','))
+                if (len(cal_rgb)!=3):
+                        raise RuntimeError("Invalid calibrate-rgb value '%s'" % args.calibrate_rgb)
+                cal.create(s, calibration_name, rgb=cal_rgb)
         else:
                 cal.read(calibration_name)
         if args.plot:
@@ -568,8 +602,23 @@ def Run(args):
                 s.clear()
         else:
                 r=Renderer(s, cal)
-                #Demo1(r, s)
-                Demo2(r, s)
+                while True:
+                        Rainbow(r, s,
+                                fps=10.,
+                                periodsec=2.,
+                                ncycles=0.,
+                                direction='y',
+                                nrainbows=1.,
+                                rgbmax=100)
+                        Rainbow(r, s,
+                                fps=10.,
+                                periodsec=2.,
+                                ncycles=0.,
+                                direction='x',
+                                nrainbows=1.,
+                                rgbmax=100)
+                        Random(s, skip=1)
+                        Vive(r, s)
 
 if __name__ == "__main__":
 
