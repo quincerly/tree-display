@@ -478,8 +478,16 @@ def Rainbow(r, s,
             fps=20.,
             periodsec=2.,
             ncycles=0.,
-            direction='x',
+            mode='x',
             nrainbows=1.,
+            bounce=False,
+            rgbs=[(1, 0, 0),
+                  (1, 0.5, 0),
+                  (1, 1, 0),
+                  (0, 1, 0),
+                  (0.5, 0, 1),
+                  (1, 0, 1),
+                  (0, 1, 1)],
             rgbmax=100):
 
         xmin=0.
@@ -491,17 +499,6 @@ def Rainbow(r, s,
 
         def foldphase(phase):
                 return phase-np.floor(phase)
-
-        rgbs=[]
-        rgbs.append((1, 0, 0))
-        rgbs.append((1, 0.5, 0))
-        rgbs.append((1, 1, 0))
-        rgbs.append((0, 1, 0))
-        rgbs.append((0, 0, 1))
-        rgbs.append((0.5, 0, 1))
-        rgbs.append((1, 0, 1))
-
-        #cphase=np.linspace(0, len(rgbs)-1, len(rgbs))/len(rgbs)
 
         # Add end/start to start/ end to improve interpolation at end point
         rgbs.insert(0, rgbs[-1])
@@ -517,12 +514,12 @@ def Rainbow(r, s,
                 bs.append(1.*rgb[2])
 
         class RGBFn:
-                def __init__(self, phase=0., direction='y', fac=1.):
+                def __init__(self, phase=0., mode='y', fac=1.):
                         self._phase=phase
-                        self._direction=direction
+                        self._mode=mode
                         self._fac=fac
-                def set_direction(self, direction):
-                        self._direction=direction
+                def set_mode(self, mode):
+                        self._mode=mode
                 def set_phase(self, phase):
                         self._phase=phase
                 def rgb_fn_phase(self, phase):
@@ -530,22 +527,29 @@ def Rainbow(r, s,
                                 np.round(np.interp(foldphase(phase), cphase, gs)*rgbmax),
                                 np.round(np.interp(foldphase(phase), cphase, bs)*rgbmax))
                 def __call__(self, x, y):
-                        if self._direction=='y':
+                        if self._mode=='y':
                                 return zip(*self.rgb_fn_phase(self._fac*(y-ymin)/(ymax-ymin)+self._phase))
-                        elif self._direction=='x':
+                        elif self._mode=='x':
                                 return zip(*self.rgb_fn_phase(self._fac*(x-xmin)/(xmax-xmin)+self._phase))
+                        elif self._mode=='radial':
+                                dx=2.*(x-0.5*(xmin+xmax))/(xmax-xmin)
+                                dy=2.*(y-0.5*(ymin+ymax))/(ymax-ymin)
+                                return zip(*self.rgb_fn_phase(self._fac*np.sqrt(dx*dx+dy*dy)+self._phase))
                         else:
-                                raise RuntimeError("Unknown direction '%s'" % self._direction)
+                                raise RuntimeError("Unknown mode '%s'" % self._mode)
 
         rgbfn=RGBFn(fac=nrainbows)
 
         phase=0
         t0=time.time()
 
-        rgbfn.set_direction(direction)
+        rgbfn.set_mode(mode)
         while ncycles==0 or phase<ncycles:
                 phase=(time.time()-t0)/periodsec
-                rgbfn.set_phase(phase)
+                if bounce:
+                        rgbfn.set_phase(0.5*(np.sin(2.*np.pi*phase)+1.))
+                else:
+                        rgbfn.set_phase(phase)
                 r.apply_rgb_fn_xy(rgbfn)
                 if not ButtonsSleep(s, 1./fps): return
 
@@ -605,20 +609,30 @@ def Run(args):
                 while True:
                         Rainbow(r, s,
                                 fps=10.,
-                                periodsec=2.,
-                                ncycles=0.,
-                                direction='y',
+                                periodsec=10.,
+                                mode='radial',
+                                nrainbows=1.,
+                                bounce=True,
+                                rgbmax=100)
+                        Rainbow(r, s,
+                                fps=10.,
+                                periodsec=4.,
+                                mode='y',
+                                bounce=True,
                                 nrainbows=1.,
                                 rgbmax=100)
                         Rainbow(r, s,
                                 fps=10.,
-                                periodsec=2.,
-                                ncycles=0.,
-                                direction='x',
+                                periodsec=4.,
+                                mode='x',
+                                bounce=True,
                                 nrainbows=1.,
                                 rgbmax=100)
-                        Random(s, skip=1)
-                        Vive(r, s)
+                        #Random(s,
+                        #       skip=1,
+                        #       fps=10.,
+                        #       periodsec=2.)
+                        #Vive(r, s)
 
 if __name__ == "__main__":
 
