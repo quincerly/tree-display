@@ -445,34 +445,36 @@ def ButtonsSleep(s, delaysec):
                         return True
                 time.sleep(dt)
 
-def Vive(r, s):
+def Vive(r, s, ncycles=0,
+         rgbs=[(0,0,1), (1,1,1), (1,0,0)],
+         rgbmax=100):
 
-        rgbmax=50
+        colours=[]
+        for rgb in rgbs:
+                colours.append(tuple(map(lambda v: v*rgbmax, rgb)))
 
-        while True:
-
-                nx=20
-                wait_ms=50
-                for ix in range(nx):
-                        x0=ix/(nx-1.)*0.9-0.9
-                        r.square(x0+0.10, x0+0.25, 0., r.ymax(), (  0  , 0, rgbmax))
-                        r.square(x0+0.25, x0+0.40, 0., r.ymax(), (rgbmax, rgbmax, rgbmax))
-                        r.square(x0+0.40, x0+0.55, 0., r.ymax(), (rgbmax,   0,   0))
-                        r.square(x0+0.55, x0+0.70, 0., r.ymax(), (  0  , 0, rgbmax))
-                        r.square(x0+0.70, x0+0.85, 0., r.ymax(), (rgbmax, rgbmax, rgbmax))
-                        r.square(x0+0.85, x0+1.00, 0., r.ymax(), (rgbmax,   0,   0))
-                        if not ButtonsSleep(s, wait_ms/1000.0): return
+        cycle=0
+        while ncycles==0 or cycle<ncycles:
 
                 s.clear()
-
-                nx=20
+                nx=30
                 wait_ms=50
                 for ix in range(nx):
-                        x0=ix/(nx-1.)*0.9-0.9
-                        r.square(x0+0.10, x0+0.40, 0., r.ymax(), (  0  , 0, rgbmax))
-                        r.square(x0+0.40, x0+0.70, 0., r.ymax(), (rgbmax, rgbmax, rgbmax))
-                        r.square(x0+0.70, x0+1.00, 0., r.ymax(), (rgbmax,   0,   0))
+                        x0=ix/(nx-1.)-1.
+                        r.square(x0, x0+0.33, 0., r.ymax(), colours[0])
+                        r.square(x0+0.33, x0+0.67, 0., r.ymax(),  colours[1])
+                        r.square(x0+0.67, x0+1.00, 0., r.ymax(),  colours[2])
                         if not ButtonsSleep(s, wait_ms/1000.0): return
+                if not ButtonsSleep(s, 2000/1000.0): return
+                for ix in range(nx):
+                        x0=ix/(nx-1.)
+                        r.square(0, x0, 0., r.ymax(), (0, 0, 0))
+                        r.square(x0, x0+0.33, 0., r.ymax(), colours[0])
+                        r.square(x0+0.33, x0+0.67, 0., r.ymax(), colours[1])
+                        r.square(x0+0.67, x0+1.00, 0., r.ymax(), colours[2])
+                        if not ButtonsSleep(s, wait_ms/1000.0): return
+
+                cycle+=1
 
 def Rainbow(r, s,
             fps=20.,
@@ -501,14 +503,15 @@ def Rainbow(r, s,
                 return phase-np.floor(phase)
 
         # Add end/start to start/ end to improve interpolation at end point
-        rgbs.insert(0, rgbs[-1])
-        rgbs.append(rgbs[1])
-        cphase=np.linspace(-1, len(rgbs)+1, len(rgbs))/len(rgbs)
+        colours=rgbs[:]
+        colours.insert(0, colours[-1])
+        colours.append(colours[1])
+        cphase=np.linspace(-1, len(colours)+1, len(colours))/len(colours)
 
         rs=[]
         gs=[]
         bs=[]
-        for rgb in rgbs:
+        for rgb in colours:
                 rs.append(1.*rgb[0])
                 gs.append(1.*rgb[1])
                 bs.append(1.*rgb[2])
@@ -553,28 +556,56 @@ def Rainbow(r, s,
                 r.apply_rgb_fn_xy(rgbfn)
                 if not ButtonsSleep(s, 1./fps): return
 
-def Random(s, pausesec=1., skip=2):
+def Random(s, periodsec=1., fps=20, skip=2, rgbmax=150):
 
         rgbs=[]
-        rgbs.append((1, 0, 0))
-        rgbs.append((1, 0.5, 0))
-        rgbs.append((1, 1, 0))
-        rgbs.append((0, 1, 0))
+        rgbs.append((1, 0.75, 0))
         rgbs.append((0.5, 0, 1))
-        rgbs.append((1, 0, 1))
-        rgbs.append((0, 1, 1))
-        rgbmax=100
+        #rgbs.append((1, 0, 0))
+        #rgbs.append((1, 0.5, 0))
+        #rgbs.append((1, 1, 0))
+        #rgbs.append((0, 1, 0))
+        #rgbs.append((0.5, 0, 1))
+        #rgbs.append((1, 0, 1))
+        #rgbs.append((0, 1, 1))
 
+        startrgbs=rgbs
+        endrgbs=rgbs
+
+        itransition=0
+        np.random.shuffle(startrgbs)
         while True:
-                s.clear()
-                np.random.shuffle(rgbs)
-                i=0
-                for ipix in range(i%skip, s.numpixels(), skip):
-                        s.set_element(ipix,
-                                      map(lambda v: v*rgbmax, rgbs[i%len(rgbs)]))
-                        i+=1
-                s.show()
-                if not ButtonsSleep(s, pausesec): return
+                np.random.shuffle(endrgbs)
+                rgba=[]
+                rgbb=[]
+                ia=0
+                ib=0
+                # Set per pixel rgb to transition between
+                for ipix in range(s.numpixels()):
+                        if (ipix+itransition)%skip==0:
+                                rgba+=[map(lambda v: v*rgbmax, startrgbs[ia%len(rgbs)])]
+                                ia+=1
+                        else:
+                                rgba+=[(0, 0, 0)]
+                        if (ipix+itransition+1)%skip==0:
+                                rgbb+=[map(lambda v: v*rgbmax, endrgbs[ib%len(rgbs)])]
+                                ib+=1
+                        else:
+                                rgbb+=[(0, 0, 0)]
+
+                t0=time.time()
+                while time.time()-t0<periodsec:
+                        f=(time.time()-t0)*1./periodsec
+                        print(f)
+                        for ipix in range(s.numpixels()):
+                                a=np.array(rgba[ipix])
+                                b=np.array(rgbb[ipix])
+                                s.set_element(ipix, (a+f*(b-a)).tolist()) 
+                        s.show()
+                        if not ButtonsSleep(s, 1./fps): return
+
+                startrgbs=endrgbs
+                itransition+=1
 
 def Run(args):
 
@@ -606,33 +637,55 @@ def Run(args):
                 s.clear()
         else:
                 r=Renderer(s, cal)
+                rgbs=[(1, 0, 0),
+                      (1, 0.5, 0),
+                      (1, 1, 0),
+                      (0, 1, 0),
+                      (0.5, 0, 1),
+                      (1, 0, 1)]
+                      #(0, 1, 1)],
                 while True:
+                        Vive(r, s, ncycles=2,
+                             rgbs=[(0,0,1), (1,1,1), (1,0,0)],
+                             rgbmax=100)
                         Rainbow(r, s,
-                                fps=10.,
-                                periodsec=10.,
+                                fps=15.,
+                                periodsec=5.,
                                 mode='radial',
                                 nrainbows=1.,
                                 bounce=True,
+                                ncycles=2,
                                 rgbmax=100)
+                        Vive(r, s, ncycles=2,
+                             rgbs=[(0,1,0), (1,1,1), (1,0.5,0)],
+                             rgbmax=100)
                         Rainbow(r, s,
-                                fps=10.,
-                                periodsec=4.,
+                                fps=15.,
+                                periodsec=8.,
                                 mode='y',
                                 bounce=True,
                                 nrainbows=1.,
+                                ncycles=2,
                                 rgbmax=100)
+                        Vive(r, s, ncycles=2,
+                             rgbs=[(1,0,1), (1,1,0), (0,1,0)],
+                             rgbmax=100)
                         Rainbow(r, s,
-                                fps=10.,
-                                periodsec=4.,
+                                fps=15.,
+                                periodsec=6.,
                                 mode='x',
                                 bounce=True,
                                 nrainbows=1.,
+                                rgbs=rgbs,
+                                ncycles=2,
                                 rgbmax=100)
+                        Vive(r, s, ncycles=2,
+                             rgbs=[(0,1,0), (1,1,0), (1,0.5,0)],
+                             rgbmax=100)
                         #Random(s,
                         #       skip=1,
                         #       fps=10.,
                         #       periodsec=2.)
-                        #Vive(r, s)
 
 if __name__ == "__main__":
 
