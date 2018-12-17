@@ -26,6 +26,11 @@ import subprocess
 
 buttons=treebuttons.TreeHatButtons()
 
+def npcolour(r, g, b):
+        return neopixel.Color(int(g), int(r), int(b))
+        #return neopixel.Color(int(r), int(g), int(b))
+        
+
 class NeopixelStrip:
         def __init__(self,
                      LED_COUNT      = 150,     # Number of LED pixels.
@@ -48,10 +53,10 @@ class NeopixelStrip:
         def clear(self, rgb=None, show=True):
                 """Set all off"""
                 if rgb is None:
-                        colour=neopixel.Color(0, 0, 0)
+                        colour=npcolour(0, 0, 0)
                 else:
                         r, g, b=rgb
-                        colour=neopixel.Color(int(r), int(g), int(b))
+                        colour=npcolour(int(r), int(g), int(b))
                 for i in range(self._strip.numPixels()):
                         self._strip.setPixelColor(i, colour)
                 if show: self._strip.show()
@@ -60,7 +65,7 @@ class NeopixelStrip:
                 self._strip.show()
 
         def set_element(self, i, (r, g, b)):
-                self._strip.setPixelColor(self._ind[i], neopixel.Color(int(r), int(g), int(b)))
+                self._strip.setPixelColor(self._ind[i], npcolour(int(r), int(g), int(b)))
 
         def numpixels(self):
                 return self._strip.numPixels()
@@ -375,6 +380,22 @@ class Renderer:
                                 self._strip.set_element(self._pixelid[i], (r, g, b))
                 if show: self._strip.show()
 
+        def circlefill(self, xc, yc, xr, yr, (r, g, b), show=True):
+                for i in range(len(self._x)):
+                        x=self._x[i]
+                        y=self._y[i]
+                        if (x-xc)*(x-xc)/(xr*xr)+(y-yc)*(y-yc)/(yr*yr)<=1:
+                                self._strip.set_element(self._pixelid[i], (r, g, b))
+                if show: self._strip.show()
+
+        def circle(self, xc, yc, xr, yr, drf, (r, g, b), show=True):
+                for i in range(len(self._x)):
+                        x=self._x[i]
+                        y=self._y[i]
+                        if np.abs((x-xc)*(x-xc)/(xr*xr)+(y-yc)*(y-yc)/(yr*yr)-1)<=drf:
+                                self._strip.set_element(self._pixelid[i], (r, g, b))
+                if show: self._strip.show()
+
         def chase(self, colours, wait_ms=50, iterations=10):
                 """Movie theater light style chaser animation."""
                 for it in range(iterations):
@@ -415,7 +436,7 @@ def HandleButtons(s):
                                 s.clear(rgb=(100, 0, 0))
                                 time.sleep(5)
                                 s.clear()
-                                subprocess.call(['sudo', 'halt'])
+                                subprocess.call(['sudo', 'poweroff'])
                                 exit()
                 elif event['type']=='release' and buttons.buttons_on(["medium"], event['prevcode']):
                         # Pause - pressed and released medium button. Wait for another press and release to resume
@@ -472,6 +493,35 @@ def Vive(r, s, ncycles=0,
                         r.square(x0, x0+0.33, 0., r.ymax(), colours[0])
                         r.square(x0+0.33, x0+0.67, 0., r.ymax(), colours[1])
                         r.square(x0+0.67, x0+1.00, 0., r.ymax(), colours[2])
+                        if not ButtonsSleep(s, wait_ms/1000.0): return
+
+                cycle+=1
+
+def Spot(r, s, ncycles=0,
+         rgbs=[(0,0,1), (1,1,0)],
+         rgbmax=100):
+
+        colours=[]
+        for rgb in rgbs:
+                colours.append(tuple(map(lambda v: v*rgbmax, rgb)))
+
+        cycle=0
+        while ncycles==0 or cycle<ncycles:
+
+                s.clear()
+                nx=30
+                wait_ms=50
+                for ix in range(nx):
+                        x0=ix/(nx-1.)-1.
+                        r.square(x0, x0+1., 0., r.ymax(), colours[0])
+                        r.circle(x0+0.4, 0.4*r.ymax(), 0.2, 0.2*r.ymax(), 0.1, colours[1])
+                        if not ButtonsSleep(s, wait_ms/1000.0): return
+                if not ButtonsSleep(s, 2000/1000.0): return
+                for ix in range(nx):
+                        x0=ix/(nx-1.)
+                        r.square(0, x0, 0., r.ymax(), (0, 0, 0))
+                        r.square(x0, x0+1., 0., r.ymax(), colours[0])
+                        r.circle(x0+0.4, 0.4*r.ymax(), 0.2, 0.2*r.ymax(), 0.1,  colours[1])
                         if not ButtonsSleep(s, wait_ms/1000.0): return
 
                 cycle+=1
@@ -645,8 +695,18 @@ def Run(args):
                       (1, 0, 1)]
                       #(0, 1, 1)],
                 while True:
+                        #Spot(r, s, ncycles=5,
+                        #     rgbs=[
+                        #             (0,0,1),
+                        #             (1,1,0),
+                        #     ],
+                        #     rgbmax=100)
                         Vive(r, s, ncycles=2,
-                             rgbs=[(0,0,1), (1,1,1), (1,0,0)],
+                             rgbs=[
+                                     (0,0,1),
+                                     (1,1,1),
+                                     (1,0,0),
+                             ],
                              rgbmax=100)
                         Rainbow(r, s,
                                 fps=15.,
@@ -657,7 +717,11 @@ def Run(args):
                                 ncycles=2,
                                 rgbmax=100)
                         Vive(r, s, ncycles=2,
-                             rgbs=[(0,1,0), (1,1,1), (1,0.5,0)],
+                             rgbs=[
+                                     (0,1,0),
+                                     (1,1,1),
+                                     (1,0.5,0),
+                             ],
                              rgbmax=100)
                         Rainbow(r, s,
                                 fps=15.,
@@ -668,7 +732,11 @@ def Run(args):
                                 ncycles=2,
                                 rgbmax=100)
                         Vive(r, s, ncycles=2,
-                             rgbs=[(1,0,1), (1,1,0), (0,1,0)],
+                             rgbs=[
+                                     (1,0,1),
+                                     (1,1,0),
+                                     (0,1,0),
+                             ],
                              rgbmax=100)
                         Rainbow(r, s,
                                 fps=15.,
@@ -680,7 +748,11 @@ def Run(args):
                                 ncycles=2,
                                 rgbmax=100)
                         Vive(r, s, ncycles=2,
-                             rgbs=[(0,1,0), (1,1,0), (1,0.5,0)],
+                             rgbs=[
+                                     (0,1,0),
+                                     (1,1,0),
+                                     (1,0.5,0),
+                             ],
                              rgbmax=100)
                         #Random(s,
                         #       skip=1,
